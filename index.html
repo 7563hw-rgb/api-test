@@ -163,13 +163,28 @@
     </script>
 </head>
 <body onload="initTmap();">
+    
     <div style="padding:10px;">
         <input type="text" id="searchKeyword" value="편의점">
         <button onclick="searchAround()">주변검색</button>
     </div>
+
+    <div style="padding: 10px; background: #fff;">
+        <button onclick="initCompass()">🧭 나침반 켜기 (방향 권한 허용)</button>
+        <span id="direction_info" style="margin-left: 10px; font-weight: bold; color: blue;">방향: 알 수 없음</span>
+    </div>
+
     <div style="display:flex;">
         <ul id="searchResult" style="width:30%; height:400px; overflow:auto;"></ul>
-        <div id="map_div"></div>
+        
+        <div id="map_div" style="width: 70%; position: relative;">
+            
+            <img id="compass_arrow" 
+                 src="https://cdn-icons-png.flaticon.com/512/318/318167.png" 
+                 style="position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; margin-top: -20px; margin-left: -20px; z-index: 9999 !important; pointer-events: none; display: none; opacity: 0.8; transform: rotate(0deg);" />
+
+        </div>
     </div>
+
 </body>
 </html>
