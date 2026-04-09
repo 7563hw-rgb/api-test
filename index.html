@@ -7,85 +7,73 @@
     <script src="https://apis.openapi.sk.com/tmap/jsv2?version=1&appKey=tWt4JKsKeJ1y7rYBPARVR5pdzwX3eLq5a2mFMx1P"></script>
     
     <script type="text/javascript">
-        var map, marker;
-        var markerArr = [], labelArr = [];
-        var clickMarker;
-        var marker_s, marker_e;
-        var resultdrawArr = [];
-        var drawInfoArr = [];
-
-        // 실시간 위치 및 경로 관리 변수
+        // [중요] 변수를 함수 밖으로 꺼내서 어디서든 쓸 수 있게 합니다.
+        var map = null;
+        var marker_s = null; // 내 위치 마커
+        var marker_e = null; // 도착지 마커
         var currentLat, currentLon;
-        var destinationLat, destinationLon;
+        var drawInfoArr = [];
+        var resultdrawArr = [];
         var isNavigating = false;
 
         function initTmap() {
-            // 1. 지도 띄우기 (초기 위치는 임의 설정, GPS 잡히면 이동함)
+            // 1. 지도 생성
             map = new Tmapv2.Map("map_div", {
                 center : new Tmapv2.LatLng(37.562593, 126.992436),
-                width : "70%",
+                width : "100%",
                 height : "400px",
-                zoom : 17,
-                zoomControl : true,
-                scrollwheel : true
+                zoom : 17
             });
 
-            // 마커 및 클릭 마커 초기화
-            marker_s = new Tmapv2.Marker({ map : map, icon: "http://tmapapi.sktelecom.com/upload/tmap/marker/pin_r_m_s.png", iconSize: new Tmapv2.Size(24, 38) });
-            clickMarker = new Tmapv2.Marker({ map : null });
-
-            // [실시간 위치 추적 시작]
+            // 2. GPS 감시 시작
             if (navigator.geolocation) {
                 navigator.geolocation.watchPosition(successCallback, errorCallback, {
                     enableHighAccuracy: true,
-                    timeout: 5000,
+                    timeout: 7000,
                     maximumAge: 0
                 });
+            } else {
+                alert("GPS를 지원하지 않는 브라우저입니다.");
             }
-
-            // 지도 클릭 이벤트 (역지오코딩)
-            map.addListener("click", function onClick(evt) {
-                var mapLatLng = evt.latLng;
-                clickMarker.setMap(null);
-                clickMarker = new Tmapv2.Marker({
-                    position : new Tmapv2.LatLng(mapLatLng._lat, mapLatLng._lng),
-                    map : map
-                });
-                reverseGeo(mapLatLng._lng, mapLatLng._lat);
-            });
-
-            // 주변 검색 버튼
-            $("#btn_select").click(function(){
-                searchAround();
-            });
         }
 
-        // [GPS 성공 콜백]
         function successCallback(position) {
             currentLat = position.coords.latitude;
             currentLon = position.coords.longitude;
             var myLatLng = new Tmapv2.LatLng(currentLat, currentLon);
 
-            // 내 위치 마커 업데이트 및 지도 중심 이동
-            marker_s.setPosition(myLatLng);
-            // map.setCenter(myLatLng); // 주석 해제 시 내 위치를 계속 중심으로 잡음
+            // [마커 로직] 기존 마커가 없으면 만들고, 있으면 위치만 옮깁니다.
+            if (marker_s == null) {
+                marker_s = new Tmapv2.Marker({
+                    position: myLatLng,
+                    map: map,
+                    // 아이콘 경로 에러 방지를 위해 기본 마커 사용 (icon 줄 삭제)
+                });
+                console.log("내 위치 마커 최초 생성");
+            } else {
+                marker_s.setPosition(myLatLng);
+                console.log("내 위치 마커 이동");
+            }
 
-            // 경로 이탈 체크 (네비게이션 중일 때만)
+            // [지도 중심 이동] 이 코드가 지도를 내 위치로 끌고 옵니다.
+            map.setCenter(myLatLng);
+
+            // 경로 이탈 체크
             if (isNavigating && drawInfoArr.length > 0) {
                 if (isOutOfPath(currentLat, currentLon, drawInfoArr)) {
-                    console.log("경로 이탈 감지! 재탐색합니다.");
                     findRoute(destinationLon, destinationLat); 
                 }
             }
         }
 
-        function errorCallback(error) { console.log("GPS Error: " + error.message); }
+        function errorCallback(error) {
+            console.log("GPS 수신 오류: " + error.message);
+        }
 
-        // [경로 이탈 판단 로직] 현재 위치와 경로 선분들 사이의 최소 거리 계산
+        // 경로 이탈 판단 (약 30m)
         function isOutOfPath(lat, lon, pathArr) {
-            var threshold = 0.0003; // 약 30m 오차 허용 (좌표계 기준)
+            var threshold = 0.0003; 
             var minDistance = Number.MAX_VALUE;
-
             for (var i = 0; i < pathArr.length; i++) {
                 var dist = Math.sqrt(Math.pow(lat - pathArr[i]._lat, 2) + Math.pow(lon - pathArr[i]._lng, 2));
                 if (dist < minDistance) minDistance = dist;
@@ -93,17 +81,18 @@
             return minDistance > threshold;
         }
 
+        // 주변 검색 함수
         function searchAround() {
-            var searchKeyword = $('#searchKeyword').val();
+            var keyword = $('#searchKeyword').val();
             var headers = { "appKey": "tWt4JKsKeJ1y7rYBPARVR5pdzwX3eLq5a2mFMx1P" };
-            
             $.ajax({
                 method:"GET",
                 headers : headers,
-                url:"https://apis.openapi.sk.com/tmap/pois/search/around?version=1&format=json&callback=result",
+                url:"https://apis.openapi.sk.com/tmap/pois/search/around?version=1&format=json",
                 data:{
-                    "categories" : searchKeyword,
+                    "categories" : keyword,
                     "resCoordType" : "EPSG3857",
+                    "searchType" : "name",
                     "radius" : 1,
                     "reqCoordType" : "WGS84GEO",
                     "centerLon" : currentLon,
@@ -111,109 +100,75 @@
                     "count" : 10
                 },
                 success:function(response){
-                    var resultpoisData = response.searchPoiInfo.pois.poi;
-                    var innerHtml = "";
-                    for(var k in resultpoisData){
-                        var noorLat = Number(resultpoisData[k].noorLat);
-                        var noorLon = Number(resultpoisData[k].noorLon);
-                        var name = resultpoisData[k].name;
-                        
-                        var pointCng = new Tmapv2.Point(noorLon, noorLat);
-                        var projectionCng = new Tmapv2.Projection.convertEPSG3857ToWGS84GEO(pointCng);
-                        
-                        innerHtml += "<li><span>"+name+"</span>&nbsp;&nbsp;"
-                        +"<button type='button' onClick='startNav("+projectionCng._lng+", "+projectionCng._lat+");'>안내시작</button></li>";
+                    var pois = response.searchPoiInfo.pois.poi;
+                    var resHtml = "";
+                    for(var i in pois){
+                        var pLat = Number(pois[i].noorLat);
+                        var pLon = Number(pois[i].noorLon);
+                        var point = new Tmapv2.Point(pLon, pLat);
+                        var conv = new Tmapv2.Projection.convertEPSG3857ToWGS84GEO(point);
+                        resHtml += "<li>" + pois[i].name + " <button onclick='startNav("+conv._lng+","+conv._lat+")'>길찾기</button></li>";
                     }
-                    $("#searchResult").html(innerHtml);
+                    $("#searchResult").html(resHtml);
                 }
             });
         }
 
         function startNav(lon, lat) {
-            destinationLon = lon;
-            destinationLat = lat;
+            destinationLon = lon; destinationLat = lat;
             isNavigating = true;
             findRoute(lon, lat);
         }
 
         function findRoute(endLon, endLat) {
             var headers = { "appKey": "tWt4JKsKeJ1y7rYBPARVR5pdzwX3eLq5a2mFMx1P" };
-
             if(marker_e) marker_e.setMap(null);
             marker_e = new Tmapv2.Marker({
                 position : new Tmapv2.LatLng(endLat, endLon),
-                icon : "http://tmapapi.sktelecom.com/upload/tmap/marker/pin_r_m_e.png",
-                iconSize : new Tmapv2.Size(24, 38),
                 map : map
             });
 
             $.ajax({
                 method : "POST",
                 headers : headers,
-                url : "https://apis.openapi.sk.com/tmap/routes/pedestrian?version=1&format=json&callback=result",
+                url : "https://apis.openapi.sk.com/tmap/routes/pedestrian?version=1&format=json",
                 data : {
-                    "startX" : currentLon.toString(),
-                    "startY" : currentLat.toString(),
-                    "endX" : endLon.toString(),
-                    "endY" : endLat.toString(),
-                    "reqCoordType" : "WGS84GEO",
-                    "resCoordType" : "EPSG3857",
-                    "startName" : "출발지",
-                    "endName" : "도착지"
+                    "startX" : currentLon.toString(), "startY" : currentLat.toString(),
+                    "endX" : endLon.toString(), "endY" : endLat.toString(),
+                    "reqCoordType" : "WGS84GEO", "resCoordType" : "EPSG3857",
+                    "startName" : "출발", "endName" : "도착"
                 },
                 success : function(response) {
-                    var resultData = response.features;
-                    $("#result").text("거리: " + (resultData[0].properties.totalDistance / 1000).toFixed(1) + "km");
-                    
+                    var features = response.features;
                     if (resultdrawArr.length > 0) {
                         for (var i in resultdrawArr) { resultdrawArr[i].setMap(null); }
                         resultdrawArr = [];
                     }
                     drawInfoArr = [];
-
-                    for (var i in resultData) {
-                        var geometry = resultData[i].geometry;
-                        if (geometry.type == "LineString") {
-                            for (var j in geometry.coordinates) {
-                                var latlng = new Tmapv2.Point(geometry.coordinates[j][0], geometry.coordinates[j][1]);
-                                var convertPoint = new Tmapv2.Projection.convertEPSG3857ToWGS84GEO(latlng);
-                                drawInfoArr.push(new Tmapv2.LatLng(convertPoint._lat, convertPoint._lng));
+                    for (var i in features) {
+                        var geom = features[i].geometry;
+                        if (geom.type == "LineString") {
+                            for (var j in geom.coordinates) {
+                                var pt = new Tmapv2.Point(geom.coordinates[j][0], geom.coordinates[j][1]);
+                                var cv = new Tmapv2.Projection.convertEPSG3857ToWGS84GEO(pt);
+                                drawInfoArr.push(new Tmapv2.LatLng(cv._lat, cv._lng));
                             }
                         }
                     }
-                    drawLine(drawInfoArr);
-                }
-            });
-        }
-
-        function drawLine(arrPoint) {
-            var polyline_ = new Tmapv2.Polyline({ path : arrPoint, strokeColor : "#DD0000", strokeWeight : 6, map : map });
-            resultdrawArr.push(polyline_);
-        }
-
-        function reverseGeo(lon, lat) {
-            var headers = { "appKey": "tWt4JKsKeJ1y7rYBPARVR5pdzwX3eLq5a2mFMx1P" };
-            $.ajax({
-                method : "GET",
-                headers : headers,
-                url : "https://apis.openapi.sk.com/tmap/geo/reversegeocoding?version=1&format=json&callback=result",
-                data : { "coordType" : "WGS84GEO", "addressType" : "A10", "lon" : lon, "lat" : lat },
-                success : function(response) {
-                    var arrResult = response.addressInfo;
-                    document.getElementById("result").innerHTML = "<strong>클릭 주소: </strong>" + arrResult.fullAddress;
+                    var polyline = new Tmapv2.Polyline({ path : drawInfoArr, strokeColor : "#FF0000", strokeWeight : 6, map : map });
+                    resultdrawArr.push(polyline);
                 }
             });
         }
     </script>
 </head>
 <body onload="initTmap();">
-    <div style="padding: 10px; background: #eee;">
-        <input type="text" id="searchKeyword" value="편의점">  
-        <button id="btn_select">주변 검색</button>
+    <div style="padding:10px;">
+        <input type="text" id="searchKeyword" value="편의점">
+        <button onclick="searchAround()">주변검색</button>
     </div>
-    <div id="result" style="padding: 10px; color: blue;">GPS 신호를 기다리는 중...</div>
-    <div style="display: flex;">
-        <div id="searchResult" style="width: 30%; height: 400px; overflow-y: auto; border-right: 1px solid #ccc;"></div>
+    <div style="display:flex;">
+        <ul id="searchResult" style="width:30%; height:400px; overflow:auto;"></ul>
         <div id="map_div"></div>
     </div>
 </body>
