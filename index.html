@@ -42,12 +42,13 @@
             currentLon = position.coords.longitude;
             var myLatLng = new Tmapv2.LatLng(currentLat, currentLon);
 
-            // [마커 로직] 기존 마커가 없으면 만들고, 있으면 위치만 옮깁니다.
+           // [마커 로직] 기존 마커가 없으면 만들고, 있으면 위치만 옮깁니다.
             if (marker_s == null) {
                 marker_s = new Tmapv2.Marker({
                     position: myLatLng,
                     map: map,
-                    // 아이콘 경로 에러 방지를 위해 기본 마커 사용 (icon 줄 삭제)
+                    icon: "https://tmapapi.sktelecom.com/upload/tmap/marker/pin_r_m_s.png", // https 적용 완료!
+                    iconSize: new Tmapv2.Size(24, 38)
                 });
                 console.log("내 위치 마커 최초 생성");
             } else {
@@ -125,6 +126,8 @@
             if(marker_e) marker_e.setMap(null);
             marker_e = new Tmapv2.Marker({
                 position : new Tmapv2.LatLng(endLat, endLon),
+                icon: "https://tmapapi.sktelecom.com/upload/tmap/marker/pin_r_m_e.png", // https 적용 완료!
+                iconSize: new Tmapv2.Size(24, 38),
                 map : map
             });
 
