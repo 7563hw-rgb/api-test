@@ -7,17 +7,22 @@
     <script src="https://apis.openapi.sk.com/tmap/jsv2?version=1&appKey=tWt4JKsKeJ1y7rYBPARVR5pdzwX3eLq5a2mFMx1P"></script>
     
     <script type="text/javascript">
-        // [중요] 변수를 함수 밖으로 꺼내서 어디서든 쓸 수 있게 합니다.
+        // ==========================================
+        // 1. 전역 변수 선언
+        // ==========================================
         var map = null;
         var marker_s = null; // 내 위치 마커
         var marker_e = null; // 도착지 마커
         var currentLat, currentLon;
+        var destinationLat, destinationLon;
         var drawInfoArr = [];
         var resultdrawArr = [];
         var isNavigating = false;
 
+        // ==========================================
+        // 2. 지도 및 GPS 초기화 함수
+        // ==========================================
         function initTmap() {
-            // 1. 지도 생성
             map = new Tmapv2.Map("map_div", {
                 center : new Tmapv2.LatLng(37.562593, 126.992436),
                 width : "100%",
@@ -25,7 +30,6 @@
                 zoom : 17
             });
 
-            // 2. GPS 감시 시작
             if (navigator.geolocation) {
                 navigator.geolocation.watchPosition(successCallback, errorCallback, {
                     enableHighAccuracy: true,
@@ -37,42 +41,51 @@
             }
         }
 
+        // ==========================================
+        // 3. 실시간 위치 업데이트 및 경로 이탈 체크
+        // ==========================================
         function successCallback(position) {
             currentLat = position.coords.latitude;
             currentLon = position.coords.longitude;
             var myLatLng = new Tmapv2.LatLng(currentLat, currentLon);
 
-            // [마커 로직] 기존 마커가 없으면 만들고, 있으면 위치만 옮깁니다.
-            if (marker_s == null) {
-                marker_s = new Tmapv2.Marker({
-                    position: myLatLng,
-                    map: map,
-                    // 아이콘 경로 에러 방지를 위해 기본 마커 사용 (icon 줄 삭제)
-                });
-                console.log("내 위치 마커 최초 생성");
-            } else {
-                marker_s.setPosition(myLatLng);
-                console.log("내 위치 마커 이동");
+            if (!map) return;
+
+            try {
+                // 내 위치 마커 (보안 연결 https 사용)
+                if (marker_s == null) {
+                    marker_s = new Tmapv2.Marker({
+                        position: myLatLng,
+                        map: map,
+                        icon: "https://tmapapi.sktelecom.com/upload/tmap/marker/pin_r_m_s.png",
+                        iconSize: new Tmapv2.Size(24, 38)
+                    });
+                } else {
+                    marker_s.setPosition(myLatLng);
+                }
+                
+                // 지도 중심을 내 위치로 이동
+                map.setCenter(myLatLng);
+                
+            } catch (e) {
+                console.error("마커 오류:", e);
             }
 
-            // [지도 중심 이동] 이 코드가 지도를 내 위치로 끌고 옵니다.
-            map.setCenter(myLatLng);
-
-            // 경로 이탈 체크
+            // 내비게이션 중일 경우 이탈 검사
             if (isNavigating && drawInfoArr.length > 0) {
                 if (isOutOfPath(currentLat, currentLon, drawInfoArr)) {
+                    console.log("경로 이탈! 재탐색 실행");
                     findRoute(destinationLon, destinationLat); 
                 }
             }
         }
 
         function errorCallback(error) {
-            console.log("GPS 수신 오류: " + error.message);
+            console.log("GPS 에러: " + error.message);
         }
 
-        // 경로 이탈 판단 (약 30m)
         function isOutOfPath(lat, lon, pathArr) {
-            var threshold = 0.0003; 
+            var threshold = 0.0003; // 이탈 임계값
             var minDistance = Number.MAX_VALUE;
             for (var i = 0; i < pathArr.length; i++) {
                 var dist = Math.sqrt(Math.pow(lat - pathArr[i]._lat, 2) + Math.pow(lon - pathArr[i]._lng, 2));
@@ -81,7 +94,9 @@
             return minDistance > threshold;
         }
 
-        // 주변 검색 함수
+        // ==========================================
+        // 4. 경로 탐색 로직
+        // ==========================================
         function searchAround() {
             var keyword = $('#searchKeyword').val();
             var headers = { "appKey": "tWt4JKsKeJ1y7rYBPARVR5pdzwX3eLq5a2mFMx1P" };
@@ -122,9 +137,13 @@
 
         function findRoute(endLon, endLat) {
             var headers = { "appKey": "tWt4JKsKeJ1y7rYBPARVR5pdzwX3eLq5a2mFMx1P" };
+            
+            // 도착지 마커 (보안 연결 https 사용)
             if(marker_e) marker_e.setMap(null);
             marker_e = new Tmapv2.Marker({
                 position : new Tmapv2.LatLng(endLat, endLon),
+                icon: "https://tmapapi.sktelecom.com/upload/tmap/marker/pin_r_m_e.png",
+                iconSize: new Tmapv2.Size(24, 38),
                 map : map
             });
 
@@ -160,6 +179,42 @@
                 }
             });
         }
+
+        // ==========================================
+        // 5. 나침반 (스마트폰 방향) 연동 함수
+        // ==========================================
+        function initCompass() {
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission()
+                    .then(permissionState => {
+                        if (permissionState === 'granted') {
+                            window.addEventListener('deviceorientation', handleOrientation);
+                            $('#compass_arrow').show();
+                        } else {
+                            alert("나침반 권한이 거부되었습니다.");
+                        }
+                    })
+                    .catch(console.error);
+            } else {
+                window.addEventListener('deviceorientationabsolute', handleOrientation);
+                window.addEventListener('deviceorientation', handleOrientation);
+                $('#compass_arrow').show();
+            }
+        }
+
+        function handleOrientation(event) {
+            var heading = 0;
+            if (event.webkitCompassHeading) {
+                heading = event.webkitCompassHeading;
+            } else if (event.alpha !== null) {
+                heading = 360 - event.alpha; 
+            }
+            heading = Math.round(heading);
+            $("#direction_info").text("방향: " + heading + "° (북:0, 동:90, 남:180, 서:270)");
+            
+            // 지도 중앙의 화살표 이미지 회전
+            $("#compass_arrow").css("transform", "rotate(" + heading + "deg)");
+        }
     </script>
 </head>
 <body onload="initTmap();">
@@ -178,11 +233,9 @@
         <ul id="searchResult" style="width:30%; height:400px; overflow:auto;"></ul>
         
         <div id="map_div" style="width: 70%; position: relative;">
-            
             <img id="compass_arrow" 
                  src="https://cdn-icons-png.flaticon.com/512/318/318167.png" 
                  style="position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; margin-top: -20px; margin-left: -20px; z-index: 9999 !important; pointer-events: none; display: none; opacity: 0.8; transform: rotate(0deg);" />
-
         </div>
     </div>
 
