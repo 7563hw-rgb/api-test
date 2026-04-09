@@ -37,35 +37,26 @@
             }
         }
 
-       // [보정된 GPS 성공 콜백]
         function successCallback(position) {
             currentLat = position.coords.latitude;
             currentLon = position.coords.longitude;
-            
-            // 지도 객체가 아직 생성되지 않았다면 중단
-            if (!map) return;
-
             var myLatLng = new Tmapv2.LatLng(currentLat, currentLon);
 
-            try {
-                if (marker_s == null) {
-                    marker_s = new Tmapv2.Marker({
-                        position: myLatLng,
-                        map: map,
-                        // https 주소와 사이즈 명시
-                        icon: "https://tmapapi.sktelecom.com/upload/tmap/marker/pin_r_m_s.png",
-                        iconSize: new Tmapv2.Size(24, 38)
-                    });
-                } else {
-                    marker_s.setPosition(myLatLng);
-                }
-                
-                // 지도를 내 위치로 이동
-                map.setCenter(myLatLng);
-                
-            } catch (e) {
-                console.error("마커 생성 중 오류 발생:", e);
+            // [마커 로직] 기존 마커가 없으면 만들고, 있으면 위치만 옮깁니다.
+            if (marker_s == null) {
+                marker_s = new Tmapv2.Marker({
+                    position: myLatLng,
+                    map: map,
+                    // 아이콘 경로 에러 방지를 위해 기본 마커 사용 (icon 줄 삭제)
+                });
+                console.log("내 위치 마커 최초 생성");
+            } else {
+                marker_s.setPosition(myLatLng);
+                console.log("내 위치 마커 이동");
             }
+
+            // [지도 중심 이동] 이 코드가 지도를 내 위치로 끌고 옵니다.
+            map.setCenter(myLatLng);
 
             // 경로 이탈 체크
             if (isNavigating && drawInfoArr.length > 0) {
