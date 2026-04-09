@@ -19,9 +19,11 @@
         var resultdrawArr = [];
         var isNavigating = false;
 
+      // ==========================================
+        // 2. 지도 및 자동 GPS 추적 (Heartbeat 패턴)
         // ==========================================
-        // 2. 지도 및 GPS 초기화 함수
-        // ==========================================
+        var gpsLoop; // 자동 갱신을 관리할 변수
+
         function initTmap() {
             map = new Tmapv2.Map("map_div", {
                 center : new Tmapv2.LatLng(37.562593, 126.992436),
@@ -31,14 +33,24 @@
             });
 
             if (navigator.geolocation) {
-                navigator.geolocation.watchPosition(successCallback, errorCallback, {
-                    enableHighAccuracy: true,
-                    timeout: 7000,
-                    maximumAge: 0
-                });
+                // 사파리 수면 모드를 강제로 뚫기 위한 자동화 로직
+                // 1. 페이지가 켜지자마자 즉시 1회 위치를 찾음
+                fetchGPS(); 
+                
+                // 2. 이후 2초(2000ms)마다 브라우저를 깨워 강제로 위치를 찾음
+                gpsLoop = setInterval(fetchGPS, 2000); 
             } else {
                 alert("GPS를 지원하지 않는 브라우저입니다.");
             }
+        }
+
+        // 브라우저에 매번 새 GPS 값을 요구하는 자동화 함수
+        function fetchGPS() {
+            navigator.geolocation.getCurrentPosition(successCallback, errorCallback, {
+                enableHighAccuracy: true,
+                timeout: 5000,
+                maximumAge: 0 // 항상 최신 값을 가져오도록 강제 (캐시 무시)
+            });
         }
 
         // ==========================================
@@ -51,35 +63,27 @@
 
             if (!map) return;
 
-            try {
-                // 내 위치 마커 (보안 연결 https 사용)
-                if (marker_s == null) {
-                    marker_s = new Tmapv2.Marker({
-                        position: myLatLng,
-                        map: map,
-                        icon: "https://tmapapi.sktelecom.com/upload/tmap/marker/pin_r_m_s.png",
-                        iconSize: new Tmapv2.Size(24, 38)
-                    });
-                } else {
-                    marker_s.setPosition(myLatLng);
-                }
-                
-                // 지도 중심을 내 위치로 이동
-                map.setCenter(myLatLng);
-                
-            } catch (e) {
-                console.error("마커 오류:", e);
+            // [마커 처리] 아이콘 속성을 빼서 브라우저 차단 우회 + 자동 갱신
+            if (marker_s == null) {
+                marker_s = new Tmapv2.Marker({
+                    position: myLatLng,
+                    map: map
+                });
+            } else {
+                marker_s.setPosition(myLatLng);
             }
+            
+            // [핵심] 지도가 2초마다 내 위치를 자동으로 쫓아옵니다.
+            map.setCenter(myLatLng);
 
-            // 내비게이션 중일 경우 이탈 검사
+            // 경로 이탈 시 자동 재탐색
             if (isNavigating && drawInfoArr.length > 0) {
                 if (isOutOfPath(currentLat, currentLon, drawInfoArr)) {
-                    console.log("경로 이탈! 재탐색 실행");
+                    console.log("경로 이탈! 자동 재탐색 실행");
                     findRoute(destinationLon, destinationLat); 
                 }
             }
         }
-
         function errorCallback(error) {
             console.log("GPS 에러: " + error.message);
         }
