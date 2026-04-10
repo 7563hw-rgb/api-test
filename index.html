@@ -167,15 +167,18 @@
         function findRoute(endLon, endLat) {
             var headers = { "appKey": "tWt4JKsKeJ1y7rYBPARVR5pdzwX3eLq5a2mFMx1P" };
             
-            // 도착지 마커 (보안 연결 https 사용)
-            if(marker_e) marker_e.setMap(null);
+            // 1. 기존 도착지 마커가 있다면 삭제
+            if(marker_e) {
+                marker_e.setMap(null);
+            }
+            
+            // 2. [핵심 수정] 투명화 버그를 막기 위해 https가 적용된 E(End) 마커 이미지를 강제 주입합니다.
             marker_e = new Tmapv2.Marker({
                 position : new Tmapv2.LatLng(endLat, endLon),
-                icon: "https://tmapapi.sktelecom.com/upload/tmap/marker/pin_r_m_e.png",
-                iconSize: new Tmapv2.Size(24, 38),
+                icon : "https://tmapapi.sktelecom.com/upload/tmap/marker/pin_r_m_e.png", // 반드시 https 유지
+                iconSize : new Tmapv2.Size(24, 38),
                 map : map
             });
-
             $.ajax({
                 method : "POST",
                 headers : headers,
