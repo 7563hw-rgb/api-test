@@ -1,276 +1,36 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-    <title>TMap Real-time Navigation</title>
-    <script src="https://code.jquery.com/jquery-3.2.1.min.js"></script>
-    <script src="https://apis.openapi.sk.com/tmap/jsv2?version=1&appKey=tWt4JKsKeJ1y7rYBPARVR5pdzwX3eLq5a2mFMx1P"></script>
-    
-    <script type="text/javascript">
-        // ==========================================
-        // 1. 전역 변수 선언
-        // ==========================================
-        var map = null;
-        var marker_s = null; // 내 위치 마커
-        var marker_e = null; // 도착지 마커
-        var currentLat, currentLon;
-        var destinationLat, destinationLon;
-        var drawInfoArr = [];
-        var resultdrawArr = [];
-        var isNavigating = false;
+// ESP32와 동일한 UUID
+const SERVICE_UUID = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
+const CHARACTERISTIC_UUID = 'beb5483e-36e1-4688-b7f5-ea07361b26a8';
+let myCharacteristic;
 
-      // ==========================================
-        // 2. 지도 및 자동 GPS 추적 (Heartbeat 패턴)
-        // ==========================================
-        var gpsLoop; // 자동 갱신을 관리할 변수
+// 사용자 버튼 클릭 시 호출되는 연결 함수 (보안상 반드시 버튼 클릭으로 실행되어야 함)
+async function connectBluetooth() {
+    try {
+        console.log('블루투스 장치 검색 중...');
+        const device = await navigator.bluetooth.requestDevice({
+            filters: [{ name: 'Haptic_Belt' }],
+            optionalServices: [SERVICE_UUID]
+        });
 
-        function initTmap() {
-            map = new Tmapv2.Map("map_div", {
-                center : new Tmapv2.LatLng(37.562593, 126.992436),
-                width : "100%",
-                height : "400px",
-                zoom : 17
-            });
-
-            if (navigator.geolocation) {
-                // 사파리 수면 모드를 강제로 뚫기 위한 자동화 로직
-                // 1. 페이지가 켜지자마자 즉시 1회 위치를 찾음
-                fetchGPS(); 
-                
-                // 2. 이후 2초(2000ms)마다 브라우저를 깨워 강제로 위치를 찾음
-                gpsLoop = setInterval(fetchGPS, 2000); 
-            } else {
-                alert("GPS를 지원하지 않는 브라우저입니다.");
-            }
-        }
-
-        // 브라우저에 매번 새 GPS 값을 요구하는 자동화 함수
-        function fetchGPS() {
-            navigator.geolocation.getCurrentPosition(successCallback, errorCallback, {
-                enableHighAccuracy: true,
-                timeout: 5000,
-                maximumAge: 0 // 항상 최신 값을 가져오도록 강제 (캐시 무시)
-            });
-        }
-
-        // ==========================================
-        // 3. 실시간 위치 업데이트 및 경로 이탈 체크
-        // ==========================================
-        function successCallback(position) {
-            currentLat = position.coords.latitude;
-            currentLon = position.coords.longitude;
-            var myLatLng = new Tmapv2.LatLng(currentLat, currentLon);
-
-            if (!map) return;
-
-            // [마커 처리] 아이콘 속성을 빼서 브라우저 차단 우회 + 자동 갱신
-            if (marker_s == null) {
-                marker_s = new Tmapv2.Marker({
-                    position: myLatLng,
-                    map: map
-                });
-            } else {
-                marker_s.setPosition(myLatLng);
-            }
-            
-            // [핵심] 지도가 2초마다 내 위치를 자동으로 쫓아옵니다.
-            map.setCenter(myLatLng);
-
-            // 경로 이탈 시 자동 재탐색
-            if (isNavigating && drawInfoArr.length > 0) {
-                if (isOutOfPath(currentLat, currentLon, drawInfoArr)) {
-                    console.log("경로 이탈! 자동 재탐색 실행");
-                    findRoute(destinationLon, destinationLat); 
-                }
-            }
-        }
-        function errorCallback(error) {
-            console.log("GPS 에러: " + error.message);
-        }
-
-        function isOutOfPath(lat, lon, pathArr) {
-            var threshold = 0.0003; // 이탈 임계값
-            var minDistance = Number.MAX_VALUE;
-            for (var i = 0; i < pathArr.length; i++) {
-                var dist = Math.sqrt(Math.pow(lat - pathArr[i]._lat, 2) + Math.pow(lon - pathArr[i]._lng, 2));
-                if (dist < minDistance) minDistance = dist;
-            }
-            return minDistance > threshold;
-        }
-
-       // ==========================================
-        // 4. 통합 검색(POI) 로직 - 전국 특정 장소 검색
-        // ==========================================
-        function searchKeyword() {
-            var keyword = $('#searchKeyword').val();
-            
-            // 검색어가 비어있으면 경고
-            if (!keyword) {
-                alert("검색어를 입력해주세요.");
-                return;
-            }
-
-            var headers = { "appKey": "tWt4JKsKeJ1y7rYBPARVR5pdzwX3eLq5a2mFMx1P" };
-
-            $.ajax({
-                method: "GET",
-                headers: headers,
-                url: "https://apis.openapi.sk.com/tmap/pois?version=1&format=json",
-                data: {
-                    "searchKeyword": keyword,
-                    "resCoordType": "EPSG3857",
-                    "reqCoordType": "WGS84GEO", // 내 현재 위치를 기준으로 정확도 향상
-                    "centerLon": currentLon,    // 현재 내 경도
-                    "centerLat": currentLat,    // 현재 내 위도
-                    "count": 10 // 결과 개수
-                },
-                success: function (response) {
-                    var pois = response.searchPoiInfo.pois.poi;
-                    var resHtml = "";
-                    
-                    if (pois.length === 0) {
-                        $("#searchResult").html("<li>검색 결과가 없습니다.</li>");
-                        return;
-                    }
-
-                    for (var i in pois) {
-                        var pLat = Number(pois[i].noorLat);
-                        var pLon = Number(pois[i].noorLon);
-                        var name = pois[i].name;
-                        var address = pois[i].newAddressList.newAddress[0].fullAddressRoad; // 도로명 주소 추가
-
-                        var point = new Tmapv2.Point(pLon, pLat);
-                        var conv = new Tmapv2.Projection.convertEPSG3857ToWGS84GEO(point);
-
-                        // 검색 결과 리스트 디자인 강화 (주소 포함)
-                        resHtml += "<li style='margin-bottom: 10px; border-bottom: 1px solid #ddd; padding-bottom: 5px;'>";
-                        resHtml += "<strong>" + name + "</strong><br>";
-                        resHtml += "<span style='font-size: 12px; color: gray;'>" + address + "</span><br>";
-                        resHtml += "<button onclick='startNav(" + conv._lng + "," + conv._lat + ")' style='margin-top: 5px;'>길찾기 시작</button>";
-                        resHtml += "</li>";
-                    }
-                    $("#searchResult").html(resHtml);
-                },
-                error: function (request, status, error) {
-                    console.log("검색 오류: " + error);
-                    alert("검색 중 오류가 발생했습니다.");
-                }
-            });
-        }
-
-        function startNav(lon, lat) {
-            destinationLon = lon; destinationLat = lat;
-            isNavigating = true;
-            findRoute(lon, lat);
-        }
-
-    function findRoute(endLon, endLat) {
-            var headers = { "appKey": "tWt4JKsKeJ1y7rYBPARVR5pdzwX3eLq5a2mFMx1P" };
-            
-            // 1. 기존 도착지 마커(또는 라벨)가 있다면 삭제
-            if (marker_e) {
-                marker_e.setMap(null);
-            }
-            
-            // 2. [절대 차단 불가 방식] 이미지(Marker)를 버리고, HTML 텍스트(Label)로 '도착지' 버튼을 그립니다.
-            var endPointHtml = "<div style='background-color: #E74C3C; color: white; padding: 5px 12px; border-radius: 20px; font-weight: bold; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3); font-size: 14px; text-align: center;'>🚩 도착지</div>";
-
-            marker_e = new Tmapv2.Label({
-                position: new Tmapv2.LatLng(endLat, endLon),
-                content: endPointHtml,
-                map: map
-            });
-            $.ajax({
-                method : "POST",
-                headers : headers,
-                url : "https://apis.openapi.sk.com/tmap/routes/pedestrian?version=1&format=json",
-                data : {
-                    "startX" : currentLon.toString(), "startY" : currentLat.toString(),
-                    "endX" : endLon.toString(), "endY" : endLat.toString(),
-                    "reqCoordType" : "WGS84GEO", "resCoordType" : "EPSG3857",
-                    "startName" : "출발", "endName" : "도착"
-                },
-                success : function(response) {
-                    var features = response.features;
-                    if (resultdrawArr.length > 0) {
-                        for (var i in resultdrawArr) { resultdrawArr[i].setMap(null); }
-                        resultdrawArr = [];
-                    }
-                    drawInfoArr = [];
-                    for (var i in features) {
-                        var geom = features[i].geometry;
-                        if (geom.type == "LineString") {
-                            for (var j in geom.coordinates) {
-                                var pt = new Tmapv2.Point(geom.coordinates[j][0], geom.coordinates[j][1]);
-                                var cv = new Tmapv2.Projection.convertEPSG3857ToWGS84GEO(pt);
-                                drawInfoArr.push(new Tmapv2.LatLng(cv._lat, cv._lng));
-                            }
-                        }
-                    }
-                    var polyline = new Tmapv2.Polyline({ path : drawInfoArr, strokeColor : "#FF0000", strokeWeight : 6, map : map });
-                    resultdrawArr.push(polyline);
-                }
-            });
-        }
-
-        // ==========================================
-        // 5. 나침반 (스마트폰 방향) 연동 함수
-        // ==========================================
-        function initCompass() {
-            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                DeviceOrientationEvent.requestPermission()
-                    .then(permissionState => {
-                        if (permissionState === 'granted') {
-                            window.addEventListener('deviceorientation', handleOrientation);
-                            $('#compass_arrow').show();
-                        } else {
-                            alert("나침반 권한이 거부되었습니다.");
-                        }
-                    })
-                    .catch(console.error);
-            } else {
-                window.addEventListener('deviceorientationabsolute', handleOrientation);
-                window.addEventListener('deviceorientation', handleOrientation);
-                $('#compass_arrow').show();
-            }
-        }
-
-        function handleOrientation(event) {
-            var heading = 0;
-            if (event.webkitCompassHeading) {
-                heading = event.webkitCompassHeading;
-            } else if (event.alpha !== null) {
-                heading = 360 - event.alpha; 
-            }
-            heading = Math.round(heading);
-            $("#direction_info").text("방향: " + heading + "° (북:0, 동:90, 남:180, 서:270)");
-            
-            // 지도 중앙의 화살표 이미지 회전
-            $("#compass_arrow").css("transform", "rotate(" + heading + "deg)");
-        }
-    </script>
-</head>
-<body onload="initTmap();">
-    
-   <div style="padding:10px;">
-        <input type="text" id="searchKeyword" placeholder="장소, 주소 검색">
-        <button onclick="searchKeyword()">통합 검색</button>
-    </div>
-
-    <div style="padding: 10px; background: #fff;">
-        <button onclick="initCompass()">🧭 나침반 켜기 (방향 권한 허용)</button>
-        <span id="direction_info" style="margin-left: 10px; font-weight: bold; color: blue;">방향: 알 수 없음</span>
-    </div>
-
-    <div style="display:flex;">
-        <ul id="searchResult" style="width:30%; height:400px; overflow:auto;"></ul>
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(SERVICE_UUID);
+        myCharacteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
         
-        <div id="map_div" style="width: 70%; position: relative;">
-            <img id="compass_arrow" 
-                 src="https://cdn-icons-png.flaticon.com/512/318/318167.png" 
-                 style="position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; margin-top: -20px; margin-left: -20px; z-index: 9999 !important; pointer-events: none; display: none; opacity: 0.8; transform: rotate(0deg);" />
-        </div>
-    </div>
+        console.log('햅틱 복대 연결 완료!');
+    } catch (error) {
+        console.error('블루투스 연결 실패:', error);
+    }
+}
 
-</body>
-</html>
+// Tmap에서 다음 웨이포인트까지의 각도(Target Angle)가 계산될 때마다 호출하는 함수
+async function sendTargetAngleToBelt(angle) {
+    if (!myCharacteristic) return;
+    
+    try {
+        // 각도를 문자열로 변환하여 전송 (예: "90")
+        const encoder = new TextEncoder();
+        await myCharacteristic.writeValue(encoder.encode(angle.toString()));
+    } catch (error) {
+        console.error('데이터 전송 실패:', error);
+    }
+}
