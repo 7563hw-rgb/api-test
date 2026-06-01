@@ -28,7 +28,7 @@
         let myCharacteristic = null;
         let isHapticEnabled = true; // 진동 ON/OFF 상태
 
-        // --- 블루투스 로직 ---
+       // --- 블루투스 로직 ---
         async function connectBluetooth() {
             try {
                 $("#ble_status").text("상태: 장치 검색 중...");
@@ -39,7 +39,12 @@
                 const server = await device.gatt.connect();
                 const service = await server.getPrimaryService(SERVICE_UUID);
                 myCharacteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
+                
+                // 💡 [여기에 추가] 연결 성공 즉시 복대에게 대기 신호(999) 발사
+                await sendTargetAngleToBelt(999);
+                
                 $("#ble_status").text("상태: 복대 연결 완료! (🟢)").css("color", "green");
+                $("#target_angle_info").text("연결됨: 길찾기를 시작하면 안내를 시작합니다.");
             } catch (error) {
                 $("#ble_status").text("상태: 연결 실패").css("color", "red");
             }
