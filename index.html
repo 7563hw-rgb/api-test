@@ -3,7 +3,7 @@
 <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TMap 햅틱 내비게이션 V2</title>
+    <title>TMap 햅틱 내비게이션 V3 (GPS 보정완료)</title>
     <script src="https://code.jquery.com/jquery-3.2.1.min.js"></script>
     <script src="https://apis.openapi.sk.com/tmap/jsv2?version=1&appKey=tWt4JKsKeJ1y7rYBPARVR5pdzwX3eLq5a2mFMx1P"></script>
     
@@ -28,7 +28,7 @@
         let myCharacteristic = null;
         let isHapticEnabled = true; // 진동 ON/OFF 상태
 
-      // --- 블루투스 로직 (안정화 버전) ---
+        // --- 블루투스 로직 (안정화 버전) ---
         async function connectBluetooth() {
             try {
                 $("#ble_status").text("상태: 장치 검색 중...");
@@ -42,7 +42,7 @@
                 
                 $("#ble_status").text("상태: 복대 연결 중... (통신 안정화)").css("color", "orange");
                 
-                // 💡 [핵심 수정] 연결 직후 통신이 완전히 열릴 때까지 500ms(0.5초) 대기
+                // 연결 직후 통신이 완전히 열릴 때까지 500ms(0.5초) 대기
                 await new Promise(resolve => setTimeout(resolve, 500));
                 
                 // 확인 사살: 999(대기 신호)를 0.2초 간격으로 3번 연속 발사하여 무조건 침묵시킴
@@ -58,6 +58,7 @@
                 console.error(error);
             }
         }
+
         async function sendTargetAngleToBelt(angle) {
             if (!myCharacteristic) return;
             try {
@@ -100,6 +101,65 @@
             return (Math.round(Math.atan2(y, x) * 180 / Math.PI) + 360) % 360;
         }
 
+        // --- 지도 기반 보정: 현재 GPS를 경로의 가장 가까운 선분에 투영 ---
+        function snapToRoute(lat, lon, pathArr) {
+            if (!pathArr || pathArr.length < 2) {
+                return { lat: lat, lon: lon, distance: Number.MAX_VALUE };
+            }
+
+            var best = { lat: lat, lon: lon, distance: Number.MAX_VALUE };
+
+            var refLatRad = lat * Math.PI / 180;
+            var metersPerDegLat = 111320;
+            var metersPerDegLon = 111320 * Math.cos(refLatRad);
+
+            function toXY(pLat, pLon) {
+                return {
+                    x: (pLon - lon) * metersPerDegLon,
+                    y: (pLat - lat) * metersPerDegLat
+                };
+            }
+
+            function toLL(x, y) {
+                return {
+                    lat: lat + (y / metersPerDegLat),
+                    lon: lon + (x / metersPerDegLon)
+                };
+            }
+
+            var p = { x: 0, y: 0 };
+
+            for (var i = 0; i < pathArr.length - 1; i++) {
+                var a = toXY(pathArr[i]._lat, pathArr[i]._lng);
+                var b = toXY(pathArr[i + 1]._lat, pathArr[i + 1]._lng);
+                var abx = b.x - a.x;
+                var aby = b.y - a.y;
+                var apx = p.x - a.x;
+                var apy = p.y - a.y;
+                var ab2 = abx * abx + aby * aby;
+
+                if (ab2 === 0) continue;
+
+                var t = (apx * abx + apy * aby) / ab2;
+                if (t < 0) t = 0;
+                if (t > 1) t = 1;
+
+                var projX = a.x + t * abx;
+                var projY = a.y + t * aby;
+                var dx = p.x - projX;
+                var dy = p.y - projY;
+                var dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist < best.distance) {
+                    var ll = toLL(projX, projY);
+                    best.lat = ll.lat;
+                    best.lon = ll.lon;
+                    best.distance = dist;
+                }
+            }
+            return best;
+        }
+
         // --- GPS 갱신 및 경로 추적 로직 ---
         function initTmap() {
             map = new Tmapv2.Map("map_div", { center : new Tmapv2.LatLng(37.562593, 126.992436), width : "100%", height : "400px", zoom : 17 });
@@ -111,6 +171,22 @@
         function successCallback(position) {
             currentLat = position.coords.latitude;
             currentLon = position.coords.longitude;
+
+            // ✅ 맵 매칭 수행 (오차 20미터 이내일 때만 선분 위로 강제 스냅)
+            var displayLat = currentLat;
+            var displayLon = currentLon;
+            if (isNavigating && drawInfoArr.length > 1) {
+                var snapped = snapToRoute(currentLat, currentLon, drawInfoArr);
+                if (snapped.distance <= 20) {
+                    displayLat = snapped.lat;
+                    displayLon = snapped.lon;
+                }
+            }
+
+            // 보정된 좌표를 최종 위치 변수에 확정 적용
+            currentLat = displayLat;
+            currentLon = displayLon;
+
             var myLatLng = new Tmapv2.LatLng(currentLat, currentLon);
 
             if (!map) return;
@@ -123,11 +199,11 @@
                 if (isOutOfPath(currentLat, currentLon, drawInfoArr)) {
                     console.log("경로 이탈. 재탐색...");
                     findRoute(destinationLon, destinationLat); 
-                    return; // 재탐색 중에는 아래 방향 로직 패스
+                    return; 
                 }
             }
 
-            // 💡 [핵심] 동적 웨이포인트 추적 알고리즘
+            // 💡 동적 웨이포인트 추적 알고리즘
             if (isNavigating && myCharacteristic && isHapticEnabled && drawInfoArr.length > 0) {
                 
                 // 1. 내가 타겟 점에 8미터 이내로 도착했으면 다음 점으로 타겟 변경
@@ -135,10 +211,10 @@
                     var targetPt = drawInfoArr[currentWaypointIndex];
                     var dist = getDistanceInMeters(currentLat, currentLon, targetPt._lat, targetPt._lng);
                     
-                    if (dist < 8) { // 8m 반경 도착 판정
+                    if (dist < 8) { 
                         currentWaypointIndex++;
                     } else {
-                        break; // 아직 도착 안 했으면 거기를 계속 가리킴
+                        break; 
                     }
                 }
 
@@ -210,7 +286,7 @@
                     var features = response.features;
                     if (resultdrawArr.length > 0) { for (var i in resultdrawArr) resultdrawArr[i].setMap(null); resultdrawArr = []; }
                     drawInfoArr = [];
-                    currentWaypointIndex = 0; // 💡 새로운 길을 찾을 때마다 타겟 점을 0번(처음)으로 초기화
+                    currentWaypointIndex = 0; 
 
                     for (var i in features) {
                         var geom = features[i].geometry;
@@ -233,9 +309,7 @@
     
     <div style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 10px; border: 1px solid #ddd;">
         <h3 style="margin-top: 0;">햅틱 내비게이션 제어</h3>
-        <!-- 연결 버튼 -->
         <button onclick="connectBluetooth()" style="padding: 10px; font-weight: bold; background-color: #007bff; color: white; border: none; border-radius: 5px;">블루투스 복대 페어링</button>
-        <!-- 💡 새로 추가된 ON/OFF 토글 버튼 -->
         <button id="toggleBtn" onclick="toggleHaptic()" style="padding: 10px; font-weight: bold; background-color: #28a745; color: white; border: none; border-radius: 5px; margin-left: 10px;">진동: ON</button>
         
         <span id="ble_status" style="margin-left: 10px; font-weight: bold;">상태: 대기 중</span>
